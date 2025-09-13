@@ -12,3 +12,5 @@ flashinfer-python
 langchain
 langgraph
 langchain-openai
+pydantic
+docker
