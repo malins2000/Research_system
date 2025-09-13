@@ -24,6 +24,7 @@ class GraphState(TypedDict):
     plan_manager: PlanManager
     blackboard: Blackboard
     persona_loader: PersonaLoader
+    rag_system: RAGSystem
     llm_client: Any
     current_plan_node_id: Optional[str]
     feedback: Optional[dict]
@@ -85,7 +86,7 @@ def research_node(state: GraphState) -> dict:
     experts = expert_forge.create_experts(required_roles)
 
     # 3. Gather information
-    rag_system = RAGSystem()  # Instantiate the RAG tool
+    rag_system = state["rag_system"]
     retrieval_agent = RetrievalAgent(llm_client, rag_system)
     retrieved_docs = retrieval_agent.execute(next_node.title)
     blackboard.post("retrieved_data", "docs", retrieved_docs)

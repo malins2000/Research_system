@@ -1,7 +1,7 @@
 import argparse
 import os
 from orchestrator import create_graph, GraphState
-from tools import PlanManager, Blackboard, PersonaLoader
+from tools import PlanManager, Blackboard, PersonaLoader, RAGSystem
 from mock_llm import MockLLMClient
 
 def main():
@@ -24,6 +24,7 @@ def main():
     plan_manager = PlanManager("research_plan.json")
     blackboard = Blackboard("blackboard.json")
     persona_loader = PersonaLoader("./personas")
+    rag_system = RAGSystem() # Uses default ./chroma_db path
 
     # 2. Create the graph
     app = create_graph()
@@ -34,6 +35,7 @@ def main():
         "plan_manager": plan_manager,
         "blackboard": blackboard,
         "persona_loader": persona_loader,
+        "rag_system": rag_system,
         "llm_client": llm_client,
         "current_plan_node_id": None,
         "feedback": None,
