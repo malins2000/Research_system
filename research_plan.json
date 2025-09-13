@@ -1,0 +1,39 @@
+{
+    "id": "13ac62df-e674-40f9-9ba8-27bd8e4a6e3b",
+    "title": "Research Plan",
+    "description": "Plan for: The history of the internet",
+    "status": "completed",
+    "experts_needed": [],
+    "children": [
+        {
+            "id": "1e0f25ba-15a9-4c64-ac16-ca1e0bce2fc0",
+            "title": "Introduction",
+            "description": "A brief introduction to the research topic.",
+            "status": "completed",
+            "experts_needed": [
+                "economist"
+            ],
+            "children": []
+        },
+        {
+            "id": "81486965-ec04-4b02-90bb-0700dab73bb3",
+            "title": "Historical Background",
+            "description": "An overview of the topic's history.",
+            "status": "completed",
+            "experts_needed": [
+                "marine_biologist"
+            ],
+            "children": []
+        },
+        {
+            "id": "5ee02cd2-724d-49c6-a4d0-043843cf41d7",
+            "title": "Current Landscape",
+            "description": "Analysis of the current state of the topic.",
+            "status": "completed",
+            "experts_needed": [
+                "economist"
+            ],
+            "children": []
+        }
+    ]
+}
