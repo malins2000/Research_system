@@ -1,4 +1,5 @@
 import json
+import re
 from typing import Any, List
 from agents.base_agent import BaseAgent
 from tools.persona_loader import PersonaLoader
@@ -36,21 +37,36 @@ class AnalyticAgent(BaseAgent):
             print("Analytic Agent: No personas found. Cannot determine expertise.")
             return []
 
-        # Formulate the prompt for the LLM
+        # NEW PROMPT: Ask the model to wrap the JSON in <experts_json> tags.
         prompt = (
-            f"You are a project manager responsible for assigning tasks to specialists. "
-            f"Based on the following task description, select the 2-3 most relevant expert roles from the available list. "
-            f"Return your selection as a JSON list of strings.\n\n"
+            f"You are a project manager. Based on the task description, select the 2-3 most relevant expert roles "
+            f"from the available list. Think step-by-step. First, analyze the task. Second, create a JSON list "
+            f"of strings for the roles. Finally, wrap this JSON object in <experts_json> tags. "
+            f"Do not include any other text after the closing </experts_json> tag.\n\n"
             f"**Task Description:**\n{context}\n\n"
-            f"**Available Roles:**\n{', '.join(available_roles)}"
+            f"**Available Roles:**\n{', '.join(available_roles)}\n\n"
+            f"YOUR RESPONSE:"
         )
 
         # Query the LLM
         response_str = self.llm_client.query(prompt)
+        json_str = "" # Initialize json_str to be available in the except block
 
         try:
-            # Parse the JSON response
-            selected_roles = json.loads(response_str)
+            # NEW PARSING LOGIC: Use regex to find the content inside our tags.
+            match = re.search(r"<experts_json>(.*?)</experts_json>", response_str, re.DOTALL)
+
+            if not match:
+                print("Analytic Agent: Error - Could not find <experts_json> tags in the LLM response.")
+                print(f"Raw LLM Response:\n{response_str}")
+                return [] # Return empty list if tags are not found
+
+            # Extract the clean JSON string
+            json_str = match.group(1).strip()
+
+            # Parse the extracted JSON
+            selected_roles = json.loads(json_str)
+
             if isinstance(selected_roles, list) and all(isinstance(role, str) for role in selected_roles):
                 # Filter to ensure only available roles are returned
                 valid_roles = [role for role in selected_roles if role in available_roles]
@@ -63,7 +79,8 @@ class AnalyticAgent(BaseAgent):
                 print("Analytic Agent: LLM response was not a list of strings.")
                 return []
         except json.JSONDecodeError as e:
-            print(f"Analytic Agent: Error decoding JSON from LLM response: {e}")
+            print(f"Analytic Agent: Error decoding JSON from the extracted block: {e}")
+            print(f"Extracted JSON String that failed parsing:\n{json_str}")
             return []
         except Exception as e:
             print(f"Analytic Agent: An unexpected error occurred: {e}")

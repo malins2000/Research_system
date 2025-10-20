@@ -1,4 +1,5 @@
 import json
+import re
 from typing import Any, List, Dict
 from agents.base_agent import BaseAgent
 
@@ -32,25 +33,36 @@ class TopicExplorerAgent(BaseAgent):
 
         context_str = "\n\n".join([f"Source: {doc.get('metadata', {}).get('source', 'N/A')}\nContent: {doc.get('content', '')}" for doc in retrieved_docs])
 
+        # NEW PROMPT: Ask the model to wrap the JSON in <topics_json> tags.
         prompt = (
-            "You are a curious and insightful research assistant. Your goal is to identify novel, relevant, "
-            "and interesting subtopics that are not explicitly covered in the main text but are suggested by the "
-            "source material. Analyze the following generated text and the source documents it was based on.\n\n"
-            "**Generated Text:**\n"
-            f"{generated_text}\n\n"
-            "**Source Documents:**\n"
-            f"{context_str}\n\n"
-            "Based on this information, identify 1-3 potential new topics for further research. "
-            "These could be unanswered questions, interesting tangents, or logical next steps. "
-            "Return your findings as a JSON list of dictionaries. Each dictionary must have three keys: "
-            "'title' (a concise topic title), 'summary' (a brief description), and 'justification' "
-            "(a sentence explaining why it's a valuable addition to the research plan)."
+            "You are a curious research assistant. Your goal is to identify novel subtopics based on the "
+            "provided text and source material. Think step-by-step. First, analyze the content. Second, create a "
+            "JSON list of dictionaries for 1-3 potential new topics. Finally, wrap this JSON object in "
+            "<topics_json> tags. Do not include any other text after the closing </topics_json> tag.\n\n"
+            "Each dictionary in the JSON list must have three keys: 'title' (a concise topic title), "
+            "'summary' (a brief description), and 'justification' (why it's a valuable addition).\n\n"
+            f"**Generated Text:**\n{generated_text}\n\n"
+            f"**Source Documents:**\n{context_str}\n\n"
+            "YOUR RESPONSE:"
         )
 
         response_str = self.llm_client.query(prompt)
+        json_str = "" # Initialize for use in the except block
 
         try:
-            proposals = json.loads(response_str)
+            # NEW PARSING LOGIC: Use regex to find the content inside our tags.
+            match = re.search(r"<topics_json>(.*?)</topics_json>", response_str, re.DOTALL)
+
+            if not match:
+                print("Topic Explorer Agent: Error - Could not find <topics_json> tags in the LLM response.")
+                print(f"Raw LLM Response:\n{response_str}")
+                return []
+
+            # Extract the clean JSON string
+            json_str = match.group(1).strip()
+
+            proposals = json.loads(json_str)
+
             if isinstance(proposals, list) and all(isinstance(p, dict) for p in proposals):
                 print(f"Topic Explorer Agent: Found {len(proposals)} new topic proposals.")
                 return proposals
@@ -58,7 +70,8 @@ class TopicExplorerAgent(BaseAgent):
                 print("Topic Explorer Agent: LLM response was not a list of dictionaries.")
                 return []
         except json.JSONDecodeError as e:
-            print(f"Topic Explorer Agent: Error decoding JSON from LLM response: {e}")
+            print(f"Topic Explorer Agent: Error decoding JSON from the extracted block: {e}")
+            print(f"Extracted JSON String that failed parsing:\n{json_str}")
             return []
         except Exception as e:
             print(f"Topic Explorer Agent: An unexpected error occurred: {e}")

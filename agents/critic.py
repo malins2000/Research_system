@@ -1,4 +1,5 @@
 import json
+import re
 from typing import Any, Union, Dict
 
 from agents.base_agent import BaseAgent
@@ -36,24 +37,41 @@ class CriticAgent(BaseAgent):
         else:
             content_str = content_to_review
 
-        # Formulate the prompt for the LLM
+        # NEW PROMPT: Ask the model to wrap the JSON in <critic_json> tags.
         prompt = (
             f"You are a meticulous critic. Your task is to evaluate the following content based on the given criteria. "
-            f"Provide your feedback in a structured JSON format with three keys: 'approved' (boolean), 'feedback' (string), and 'rating' (a float from 0.0 to 5.0). "
-            f"\n\n**Evaluation Criteria:**\n{evaluation_criteria}"
-            f"\n\n**Content to Review:**\n{content_str}"
+            f"Think step-by-step. First, analyze the content. Second, create a JSON object with your feedback. "
+            f"Finally, wrap this JSON object in <critic_json> tags. "
+            f"Do not include any other text after the closing </critic_json> tag.\n\n"
+            f"The JSON must have three keys: 'approved' (boolean), 'feedback' (string), and 'rating' (a float from 0.0 to 5.0).\n\n"
+            f"**Evaluation Criteria:**\n{evaluation_criteria}\n\n"
+            f"**Content to Review:**\n{content_str}\n\n"
+            f"YOUR RESPONSE:"
         )
 
         # Query the LLM
         response_str = self.llm_client.query(prompt)
+        json_str = "" # Initialize for use in the except block
 
         try:
-            # Parse the JSON response
-            evaluation_result = json.loads(response_str)
+            # NEW PARSING LOGIC: Use regex to find the content inside our tags.
+            match = re.search(r"<critic_json>(.*?)</critic_json>", response_str, re.DOTALL)
+
+            if not match:
+                print("Critic Agent: Error - Could not find <critic_json> tags in the LLM response.")
+                print(f"Raw LLM Response:\n{response_str}")
+                return {"approved": False, "feedback": "Failed to find <critic_json> tags in response.", "rating": 0.0}
+
+            # Extract the clean JSON string
+            json_str = match.group(1).strip()
+
+            # Parse the extracted JSON
+            evaluation_result = json.loads(json_str)
             print("Critic Agent: Successfully evaluated content.")
             return evaluation_result
         except json.JSONDecodeError as e:
-            print(f"Critic Agent: Error decoding JSON from LLM response: {e}")
+            print(f"Critic Agent: Error decoding JSON from the extracted block: {e}")
+            print(f"Extracted JSON String that failed parsing:\n{json_str}")
             return {"approved": False, "feedback": "Failed to parse LLM response.", "rating": 0.0}
         except Exception as e:
             print(f"Critic Agent: An unexpected error occurred: {e}")
