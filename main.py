@@ -4,8 +4,11 @@ import os
 from orchestrator import create_graph, GraphState
 from tools import PlanManager, Blackboard, PersonaLoader, RAGSystem, ArxivSearchTool
 from mock_llm import MockLLMClient
+from web_client import client
 
 DB_PATH = r"/media/malin/1002CB2602CB1020/ChromaDB_RAG"
+
+assert client, "Cannot continue - client not initialized"
 
 def main():
     """

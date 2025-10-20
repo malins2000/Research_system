@@ -11,3 +11,4 @@ aiohttp
 fastapi
 uvicorn[standard]
 gradio
+openai

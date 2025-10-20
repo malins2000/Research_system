@@ -3,8 +3,8 @@ import gradio as gr
 import openai
 import time
 import json
-import requests  # <-- NOWE
-import os  # <-- NOWE
+import requests
+import os
 from datetime import datetime
 
 # --- Konfiguracja Klienta OpenAI ---
