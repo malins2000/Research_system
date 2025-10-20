@@ -1,8 +1,11 @@
 import argparse
 import os
 from orchestrator import create_graph, GraphState
-from tools import PlanManager, Blackboard, PersonaLoader, RAGSystem
+from tools import PlanManager, Blackboard, PersonaLoader, RAGSystem, ArxivSearchTool
 from mock_llm import MockLLMClient
+import logging
+
+DB_PATH = r"/media/malin/1002CB2602CB1020/ChromaDB_RAG"
 
 def main():
     """
@@ -24,7 +27,9 @@ def main():
     plan_manager = PlanManager("research_plan.json")
     blackboard = Blackboard("blackboard.json")
     persona_loader = PersonaLoader("./personas")
-    rag_system = RAGSystem() # Uses default ./chroma_db path
+    rag_system = RAGSystem(db_path=DB_PATH)
+    arxiv_tool = ArxivSearchTool()
+    logging.info("All components initialized.")
 
     # 2. Create the graph
     app = create_graph()
@@ -36,6 +41,7 @@ def main():
         "blackboard": blackboard,
         "persona_loader": persona_loader,
         "rag_system": rag_system,
+        "arxiv_tool": arxiv_tool,
         "llm_client": llm_client,
         "current_plan_node_id": None,
         "feedback": None,

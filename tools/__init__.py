@@ -7,6 +7,7 @@ from .code_executor import CodeExecutor
 from .persona_loader import PersonaLoader
 from .plan_manager import PlanManager
 from .rag_system import RAGSystem
+from .arxiv_search import ArxivSearchTool
 
 __all__ = [
     "Blackboard",
@@ -14,4 +15,5 @@ __all__ = [
     "PersonaLoader",
     "PlanManager",
     "RAGSystem",
+    "ArxivSearchTool",
 ]

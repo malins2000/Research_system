@@ -14,7 +14,7 @@ from agents import (
     PlanUpdaterAgent,
     SummaryAgent
 )
-from tools import PlanManager, Blackboard, PersonaLoader, RAGSystem
+from tools import PlanManager, Blackboard, PersonaLoader, RAGSystem, ArxivSearchTool
 from mock_llm import MockLLMClient
 
 
@@ -25,6 +25,7 @@ class GraphState(TypedDict):
     blackboard: Blackboard
     persona_loader: PersonaLoader
     rag_system: RAGSystem
+    arxiv_tool: ArxivSearchTool
     llm_client: Any
     current_plan_node_id: Optional[str]
     feedback: Optional[dict]
@@ -87,7 +88,8 @@ def research_node(state: GraphState) -> dict:
 
     # 3. Gather information
     rag_system = state["rag_system"]
-    retrieval_agent = RetrievalAgent(llm_client, rag_system)
+    arxiv_tool = state["arxiv_tool"]
+    retrieval_agent = RetrievalAgent(llm_client, rag_system, arxiv_tool)
     retrieved_docs = retrieval_agent.execute(next_node.title)
     blackboard.post("retrieved_data", "docs", retrieved_docs)
     log.append(f"Retrieved {len(retrieved_docs)} documents.")
