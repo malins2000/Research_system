@@ -1,4 +1,5 @@
 import json
+from collections import deque
 from typing import Any, List, Dict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from agents.base_agent import BaseAgent
@@ -52,9 +53,9 @@ class RetrievalAgent(BaseAgent):
             search_queries = [topic]
 
         # Step 2: Execute all queries and source searches in parallel
-        all_retrieved_docs = []
+        all_retrieved_docs = deque()
         with ThreadPoolExecutor(max_workers=10) as executor:
-            futures = []
+            futures = deque()
             for query in search_queries:
                 print(f"Retrieval Agent: Submitting jobs for query: '{query}'")
                 # Submit a job for the RAG system
@@ -87,7 +88,7 @@ class RetrievalAgent(BaseAgent):
 
         # Step 4: Add new documents to RAG (can also be parallelized)
         with ThreadPoolExecutor(max_workers=10) as executor:
-            futures = []
+            futures = deque()
             for doc in final_results:
                 # We only need to add documents that came from external sources
                 if doc.get('metadata', {}).get('source') == 'arXiv':

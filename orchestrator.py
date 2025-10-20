@@ -2,6 +2,7 @@ import json
 from typing import TypedDict, List, Optional, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import partial
+from collections import deque
 
 # Import agents and tools
 from agents import (
@@ -104,14 +105,14 @@ def research_node(state: GraphState) -> dict:
     log.append(f"Retrieved {len(retrieved_docs)} unique documents.")
 
     # 4. Run the Parallel Expert Debate
-    discussion_history = []
+    discussion_history = deque()
     log.append(f"Starting {DEBATE_ROUNDS}-round expert debate with {len(experts)} experts...")
 
     for i in range(DEBATE_ROUNDS):
         print(f"--- Debate Round {i+1} ---")
         log.append(f"Starting debate round {i+1}/{DEBATE_ROUNDS}")
 
-        round_responses = []
+        round_responses = deque()
         with ThreadPoolExecutor(max_workers=len(experts)) as executor:
             # Create a partial function to pass the common arguments
             execute_task = partial(
