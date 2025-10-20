@@ -44,6 +44,11 @@ class GraphState(TypedDict):
 
     # --- NEW FIELD ---
     research_feedback: Optional[str] # Stores critic feedback for the current research topic
+    research_retry_count: int = 0    # Tracks retries for the current research topic
+
+    # --- NEW FIELDS ---
+    best_draft_so_far: Optional[str] = None # Stores the text of the best draft during retries
+    best_rating_so_far: int = 0             # Stores the rating of the best draft
 
 
 # --- Node Functions ---
@@ -111,6 +116,12 @@ def research_node(state: GraphState) -> dict:
     blackboard.clear_section("output_draft")
     blackboard.clear_section("topic_proposals") # Also clear proposals
     log.append("Cleared operational blackboard sections.")
+    # --- END ADDITION ---
+
+    # --- ADD THIS: Reset best draft tracking for the new node ---
+    state["best_draft_so_far"] = None
+    state["best_rating_so_far"] = 0
+    # We keep research_retry_count as is, it gets reset by the router on success/limit
     # --- END ADDITION ---
 
     # 1. Analyze task and determine required experts
@@ -275,27 +286,26 @@ def exploration_node(state: GraphState) -> dict:
 
 def critique_node(state: GraphState) -> dict:
     """
-    Evaluates the most recent output (plan or draft).
+    Evaluates the most recent output (plan or draft) and tracks the best draft.
     """
     print("--- Executing Critique Node ---")
     log = state.get("run_log", [])
     last_node = state["last_completed_node"]
+    current_node_id = state.get("current_plan_node_id")
 
     content_to_review = None
     evaluation_criteria = ""
     previous_feedback = None
 
     if last_node == "planning_node":
-        content_to_review = state.get("current_plan_json") # Read from state
+        content_to_review = state.get("current_plan_json")
         evaluation_criteria = "Evaluate the logical structure, completeness (including data gathering steps), and feasibility of this research plan."
-        previous_feedback = state.get("planning_feedback") # Pass previous feedback
+        previous_feedback = state.get("planning_feedback")
 
-    elif last_node == "writing_node" or last_node == "exploration_node":
-        node_id = state["current_plan_node_id"]
-        content_to_review = state["blackboard"].get("output_draft", node_id)
+    elif last_node in ["writing_node", "exploration_node"]:
+        content_to_review = state["blackboard"].get("output_draft", current_node_id)
         evaluation_criteria = "Evaluate the clarity, coherence, and accuracy of the generated text based on standard research principles."
-        # We don't need to pass previous feedback for the main loop (yet)
-        previous_feedback = None
+        previous_feedback = state.get("research_feedback")
 
     if not content_to_review:
         log.append("Critique Node: No content found to review.")
@@ -303,57 +313,25 @@ def critique_node(state: GraphState) -> dict:
 
     critic_agent = CriticAgent(state["llm_client"])
     feedback = critic_agent.execute(content_to_review, evaluation_criteria, previous_feedback)
+    rating = feedback.get("rating", 0)
+    log.append(f"Critique complete. Rating: {rating}")
 
-    log.append(f"Critique complete. Rating: {feedback.get('rating')}")
+    # --- ADD THIS: Track the best draft during research retries ---
+    if last_node in ["writing_node", "exploration_node"]:
+        current_draft = state["blackboard"].get("output_draft", current_node_id)
+        best_rating_so_far = state.get("best_rating_so_far", 0)
+
+        if current_draft and rating > best_rating_so_far:
+            log.append(f"New best draft found with rating {rating} (previous best: {best_rating_so_far}).")
+            state["best_draft_so_far"] = current_draft
+            state["best_rating_so_far"] = rating
+    # --- END ADDITION ---
 
     # Save feedback for the correct loop
     if last_node == "planning_node":
         return {"run_log": log, "planning_feedback": feedback.get('feedback'), "feedback": feedback}
     else:
-        return {"run_log": log, "feedback": feedback}
-
-
-def update_summary_node(state: GraphState) -> dict:
-    """
-    Updates the running summary of the project.
-    This node is called after a draft is approved.
-    """
-    print("--- Executing Update Summary Node ---")
-    log = state.get("run_log", [])
-    plan_manager = state["plan_manager"]
-    current_node_id = state["current_plan_node_id"]
-
-    if not current_node_id:
-        log.append("Update Summary Node: No current plan node ID found. Skipping.")
-        return {"run_log": log}
-
-    # Get completed draft and node title
-    draft = state["blackboard"].get("output_draft", current_node_id)
-    current_node = plan_manager._find_node_by_id(plan_manager.plan, current_node_id)
-    node_title = current_node.title if current_node else "Unknown Section"
-
-    new_summary = ""
-    if draft:
-        # Save the final content to the blackboard
-        state["blackboard"].post("final_content", current_node_id, draft)
-
-        previous_summary = state.get("project_summary_so_far")
-        llm_client = state["llm_client"]
-
-        new_summary = _update_running_summary(llm_client, previous_summary, node_title, draft)
-        log.append("Running summary updated.")
-    else:
-        log.append("Update Summary Node: No draft found to summarize.")
-
-    # Mark the node as completed *after* its content has been used
-    plan_manager.update_node_status(current_node_id, "completed")
-    log.append(f"Node {current_node_id} marked as completed.")
-
-    return {
-        "run_log": log,
-        "project_summary_so_far": new_summary,
-        "last_completed_node": "update_summary_node"
-    }
+        return {"run_log": log, "feedback": feedback} # Keep returning feedback for router
 
 
 def summarize_node(state: GraphState) -> dict:
@@ -418,54 +396,125 @@ def _update_running_summary(llm_client: Any, previous_summary: Optional[str], ne
 
 def after_critique_router(state: GraphState) -> str:
     """
-    Routes the workflow after the critique node based on the last completed node and feedback.
+    Routes the workflow after critique, implementing a retry limit
+    with a "save best draft" fallback.
     """
     last_completed_node = state.get("last_completed_node")
     feedback = state.get("feedback")
     rating = feedback.get("rating", 0)
+    log = state.get("run_log", []) # Get log to append warnings
 
+    # --- Planning Loop Logic (Unchanged, uses rating > 90) ---
     if last_completed_node == "planning_node":
         print("--- Deciding After Plan Critique ---")
         if rating > 90:
             print(f"Plan approved with rating {rating}. Proceeding to research.")
+            state["planning_feedback"] = None # Clear feedback on success
             return "research_node"
         else:
-            print(f"Plan rejected with rating {rating}. Looping back to planning for refinement.")
+            print(f"Plan rejected with rating {rating}. Looping back for refinement.")
+            # planning_feedback was already set in critique_node
             return "planning_node"
 
+    # --- Research Loop Logic (NEW "Save Best" Implementation) ---
     elif last_completed_node in ["writing_node", "exploration_node"]:
         print("--- Deciding After Research Critique ---")
-        if rating > 80: # Approved
-            print(f"Draft approved with rating {rating}. Proceeding to update summary.")
-            # --- ADD THIS: Clear feedback on success ---
-            state["research_feedback"] = None
-            # --- END ADDITION ---
-            return "update_summary_node"
-        else: # Rejected
-            print(f"Draft rejected with rating {rating}. Retrying research for the current node.")
-            # --- ADD THIS: Store feedback before looping ---
-            state["research_feedback"] = feedback.get('feedback')
-            # --- END ADDITION ---
-            return "research_node"
+        current_node_id = state["current_plan_node_id"]
+        plan_manager = state["plan_manager"]
 
-    else:
+        # --- CONFIGURATION ---
+        RESEARCH_APPROVAL_THRESHOLD = 80
+        MAX_RESEARCH_RETRIES = 3
+        # ---------------------
+
+        if rating > RESEARCH_APPROVAL_THRESHOLD: # Approved
+            print(f"Draft approved with rating {rating}.")
+            if current_node_id:
+                plan_manager.update_node_status(current_node_id, "completed")
+                print(f"Node {current_node_id} marked as completed.")
+
+                # Use the *just approved* draft for final content and summary update
+                approved_draft = state["blackboard"].get("output_draft", current_node_id)
+                current_node = plan_manager._find_node_by_id(plan_manager.plan, current_node_id)
+                node_title = current_node.title if current_node else "Unknown Section"
+
+                if approved_draft:
+                    state["blackboard"].post("final_content", current_node_id, approved_draft)
+                    previous_summary = state.get("project_summary_so_far")
+                    llm_client = state["llm_client"]
+                    new_summary = _update_running_summary(llm_client, previous_summary, node_title, approved_draft)
+                    state["project_summary_so_far"] = new_summary
+
+            # Reset retry counters and best draft tracking on success
+            state["research_retry_count"] = 0
+            state["research_feedback"] = None
+            state["best_draft_so_far"] = None
+            state["best_rating_so_far"] = 0
+
+            # Proceed: Check for more nodes or go to summary
+            if plan_manager.get_next_pending_node():
+                print("More pending nodes found. Continuing research loop.")
+                return "research_node"
+            else:
+                print("All plan nodes are complete. Proceeding to summarization.")
+                return "summarize_node"
+
+        else: # Rejected
+            current_retry_count = state.get("research_retry_count", 0)
+            print(f"Draft rejected with rating {rating}. Retry attempt {current_retry_count + 1}/{MAX_RESEARCH_RETRIES}.")
+
+            state["research_retry_count"] = current_retry_count + 1
+
+            if state["research_retry_count"] > MAX_RESEARCH_RETRIES:
+                # --- Retry Limit Reached ---
+                log.append(f"WARNING: Research retry limit ({MAX_RESEARCH_RETRIES}) reached for node {current_node_id}. Using best draft found (rating: {state.get('best_rating_so_far', 0)}).")
+                print(f"WARNING: Retry limit reached for node {current_node_id}. Using best draft.")
+
+                best_draft = state.get("best_draft_so_far")
+                best_rating = state.get("best_rating_so_far", 0)
+
+                if current_node_id:
+                    plan_manager.update_node_status(current_node_id, "completed") # Mark as complete anyway
+                    print(f"Node {current_node_id} marked as completed (fallback).")
+
+                    if best_draft: # Use the best draft found during retries
+                        state["blackboard"].post("final_content", current_node_id, best_draft)
+                        current_node = plan_manager._find_node_by_id(plan_manager.plan, current_node_id)
+                        node_title = current_node.title if current_node else "Unknown Section"
+
+                        previous_summary = state.get("project_summary_so_far")
+                        llm_client = state["llm_client"]
+                        new_summary = _update_running_summary(llm_client, previous_summary, node_title, best_draft)
+                        state["project_summary_so_far"] = new_summary
+                    else:
+                        # If somehow no best draft was saved (e.g., all attempts failed parsing), save an error message
+                        error_message = f"ERROR: Could not generate acceptable content for this section after {MAX_RESEARCH_RETRIES} retries."
+                        state["blackboard"].post("final_content", current_node_id, error_message)
+                        log.append(f"ERROR: No best draft saved for node {current_node_id}. Saving error message.")
+
+                # Reset counters and tracking before moving on
+                state["research_retry_count"] = 0
+                state["research_feedback"] = None
+                state["best_draft_so_far"] = None
+                state["best_rating_so_far"] = 0
+
+                # Proceed: Check for more nodes or go to summary
+                if plan_manager.get_next_pending_node():
+                    print("Moving to next node after fallback.")
+                    return "research_node"
+                else:
+                    print("All plan nodes complete after fallback. Proceeding to summarization.")
+                    return "summarize_node"
+
+            else:
+                # --- Limit Not Reached: Store feedback and loop back ---
+                state["research_feedback"] = feedback.get('feedback') # Store feedback for next research_node run
+                print("Looping back to research node for refinement.")
+                return "research_node"
+
+    else: # Fallback
         print("Unknown state after critique. Ending.")
         return END
-
-
-def after_summary_update_router(state: GraphState) -> str:
-    """
-    Routes the workflow after the summary has been updated.
-    """
-    print("--- Deciding After Summary Update ---")
-    plan_manager = state["plan_manager"]
-
-    if plan_manager.get_next_pending_node():
-        print("More pending nodes found. Continuing research loop.")
-        return "research_node"
-    else:
-        print("All plan nodes are complete. Proceeding to final summarization.")
-        return "summarize_node"
 
 
 # --- Graph Assembly ---
@@ -482,7 +531,6 @@ def create_graph():
     workflow.add_node("writing_node", writing_node)
     workflow.add_node("exploration_node", exploration_node)
     workflow.add_node("critique_node", critique_node)
-    workflow.add_node("update_summary_node", update_summary_node) # New node
     workflow.add_node("summarize_node", summarize_node)
 
     # Set entry point
@@ -499,10 +547,6 @@ def create_graph():
     workflow.add_conditional_edges(
         "critique_node",
         after_critique_router,
-    )
-    workflow.add_conditional_edges(
-        "update_summary_node",
-        after_summary_update_router,
     )
 
     # Compile the graph

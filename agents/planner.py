@@ -52,19 +52,27 @@ class PlannerAgent(BaseAgent):
 
         response_str = self.llm_client.query(prompt)
 
+        json_str = ""
         try:
+            # Stage 1: Try parsing JSON wrapped in XML tags
             match = re.search(r"<plan_json>(.*?)</plan_json>", response_str, re.DOTALL)
-            if not match:
-                print(f"Planner Agent: Error - Could not find <plan_json> tags in the LLM response.")
-                print(f"Raw LLM Response:\n{response_str}")
-                raise ValueError("No valid <plan_json> block found.")
-
-            json_str = match.group(1).strip()
-            initial_structure = json.loads(json_str)
+            if match:
+                json_str = match.group(1).strip()
+                initial_structure = json.loads(json_str)
+            else:
+                # Stage 2 (Fallback): Use regex to find the first JSON object or array
+                print("Planner Agent: Could not find <plan_json> tags. Falling back to regex search.")
+                json_match = re.search(r"\{.*\}|\[.*\]", response_str, re.DOTALL)
+                if json_match:
+                    json_str = json_match.group(0).strip()
+                    initial_structure = json.loads(json_str)
+                else:
+                    print(f"Planner Agent: Error - No JSON found in the LLM response.")
+                    print(f"Raw LLM Response:\n{response_str}")
+                    raise ValueError("No valid JSON block found.")
 
             # This will create a new plan OR overwrite the old one
             plan_manager.create_plan(prompt=user_prompt, initial_structure=initial_structure)
-
             print("Planner Agent: Successfully parsed plan and saved.")
 
         except json.JSONDecodeError as e:

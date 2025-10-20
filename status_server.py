@@ -5,6 +5,7 @@ from typing import Dict, Any, Optional
 import uuid
 import os
 import threading
+import json
 import logging
 
 # --- Import all system components ---
@@ -73,8 +74,54 @@ def run_research_in_background(initial_state: GraphState):
 
     try:
         # This is the blocking call that will run for hours
-        app.state.graph.invoke(initial_state)
+        final_state = app.state.graph.invoke(initial_state)
         logger.info("LangGraph invocation finished successfully.")
+
+        # --- NEW: Save the final report ---
+        logger.info("Assembling and saving the final report...")
+        final_summary = final_state.get("final_summary", "No summary was generated.")
+        final_content_sections = final_state['blackboard'].get_section("final_content")
+
+        if not final_content_sections:
+            logger.warning("No final content found on the blackboard. Report will only have a summary.")
+            report_content = f"# Final Report\n\n## Summary\n{final_summary}"
+        else:
+            # Re-load the plan to get the correct order of sections
+            try:
+                with open("research_plan.json", 'r') as f:
+                    plan_data = json.load(f)
+
+                ordered_nodes = plan_data.get("children", [])
+
+                # Assemble the markdown string
+                report_sections = [f"# Final Report\n\n## Summary\n{final_summary}\n\n---"]
+
+                for node in ordered_nodes:
+                    node_id = node.get("id")
+                    node_title = node.get("title", "Untitled Section")
+
+                    # Find the content for this node_id in the final sections
+                    section_content = final_content_sections.get(node_id)
+
+                    if section_content:
+                        report_sections.append(f"## {node_title}\n\n{section_content}\n\n---")
+                    else:
+                        logger.warning(f"Content for plan node '{node_title}' (ID: {node_id}) not found in final_content.")
+
+                report_content = "\n".join(report_sections)
+                logger.info(f"Successfully assembled report with {len(report_sections) - 1} sections.")
+
+            except FileNotFoundError:
+                logger.error("Could not find research_plan.json to order the final report.")
+                report_content = "# Final Report\n\n## Summary\n{final_summary}\n\n" + \
+                                 "## Unordered Content\n\n" + "\n\n".join(final_content_sections.values())
+
+        # Save the report
+        with open("final_report.md", "w") as f:
+            f.write(report_content)
+        logger.info("Final report saved successfully to final_report.md")
+        # --- END NEW ---
+
     except Exception as e:
         logger.error(f"Exception in background research thread: {e}", exc_info=True)
     finally:

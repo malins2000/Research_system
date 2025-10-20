@@ -38,18 +38,24 @@ class TopicExplorerAgent(BaseAgent):
 
         response_str = self.llm_client.query(prompt)
 
+        json_str = ""
         try:
-            # Use regex to find the content *inside* our tags
+            # Stage 1: Try parsing JSON wrapped in XML tags
             match = re.search(r"<proposals_json>(.*?)</proposals_json>", response_str, re.DOTALL)
-
-            if not match:
-                # IMPORTANT: Use the correct tag name here if it's different in the log
-                print(f"Topic Explorer Agent: Error - Could not find <proposals_json> tags in the LLM response.")
-                print(f"Raw LLM Response:\n{response_str}")
-                return [] # Return empty list on failure
-
-            json_str = match.group(1).strip()
-            proposals = json.loads(json_str)
+            if match:
+                json_str = match.group(1).strip()
+                proposals = json.loads(json_str)
+            else:
+                # Stage 2 (Fallback): Use regex to find the first JSON object or array
+                print("Topic Explorer Agent: Could not find <proposals_json> tags. Falling back to regex search.")
+                json_match = re.search(r"\{.*\}|\[.*\]", response_str, re.DOTALL)
+                if json_match:
+                    json_str = json_match.group(0).strip()
+                    proposals = json.loads(json_str)
+                else:
+                    print(f"Topic Explorer Agent: Error - No JSON found in the LLM response.")
+                    print(f"Raw LLM Response:\n{response_str}")
+                    return []
 
             if isinstance(proposals, list):
                 print(f"Topic Explorer Agent: Found {len(proposals)} new topic proposals.")

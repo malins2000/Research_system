@@ -56,15 +56,24 @@ class CriticAgent(BaseAgent):
 
         response_str = self.llm_client.query(prompt)
 
+        json_str = ""
         try:
+            # Stage 1: Try parsing JSON wrapped in XML tags
             match = re.search(r"<critic_json>(.*?)</critic_json>", response_str, re.DOTALL)
-            if not match:
-                print(f"Critic Agent: Error - Could not find <critic_json> tags.")
-                print(f"Raw LLM Response:\n{response_str}")
-                return {"rating": 0, "feedback": "Failed to parse <critic_json> from LLM response."}
-
-            json_str = match.group(1).strip()
-            evaluation_result = json.loads(json_str)
+            if match:
+                json_str = match.group(1).strip()
+                evaluation_result = json.loads(json_str)
+            else:
+                # Stage 2 (Fallback): Use regex to find the first JSON object or array
+                print("Critic Agent: Could not find <critic_json> tags. Falling back to regex search.")
+                json_match = re.search(r"\{.*\}|\[.*\]", response_str, re.DOTALL)
+                if json_match:
+                    json_str = json_match.group(0).strip()
+                    evaluation_result = json.loads(json_str)
+                else:
+                    print(f"Critic Agent: Error - No JSON found in the LLM response.")
+                    print(f"Raw LLM Response:\n{response_str}")
+                    return {"rating": 0, "feedback": "No valid JSON block found in response."}
 
             # Ensure keys exist
             if 'rating' not in evaluation_result or 'feedback' not in evaluation_result:
@@ -75,5 +84,5 @@ class CriticAgent(BaseAgent):
 
         except Exception as e:
             print(f"Critic Agent: Error parsing response: {e}")
-            print(f"Raw String: {response_str}")
+            print(f"Raw String that failed parsing:\n{json_str}")
             return {"rating": 0, "feedback": f"An unexpected error occurred: {e}"}
