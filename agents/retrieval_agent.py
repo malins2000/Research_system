@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from agents.base_agent import BaseAgent
 from tools.rag_system import RAGSystem
 from tools.arxiv_search import ArxivSearchTool
+from utils import parse_llm_json_output
 
 class RetrievalAgent(BaseAgent):
     """
@@ -44,12 +45,14 @@ class RetrievalAgent(BaseAgent):
             f"Return the queries as a JSON list of strings."
         )
         response_str = self.llm_client.query(prompt)
+        parsed_queries = parse_llm_json_output(response_str, "queries_json")
 
-        try:
-            search_queries = json.loads(response_str)
-        except json.JSONDecodeError as e:
-            print(f"Retrieval Agent: Error decoding search queries from LLM response: {e}")
-            search_queries = [topic]
+        if parsed_queries and isinstance(parsed_queries, list):
+            search_queries = parsed_queries
+            print(f"Retrieval Agent: Successfully parsed {len(search_queries)} search queries.")
+        else:
+            print(f"Retrieval Agent: Failed to parse search queries. Falling back to topic.")
+            search_queries = [topic]  # Fallback to using the topic itself
 
         # Step 2: Execute all queries and source searches in parallel
         all_retrieved_docs = []

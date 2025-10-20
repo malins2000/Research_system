@@ -73,8 +73,10 @@ def run_research_in_background(initial_state: GraphState):
     app.state.system_status["current_prompt"] = initial_state['user_prompt']
 
     try:
+        # Config to increase recursion limit
+        config = {"recursion_limit": 150}
         # This is the blocking call that will run for hours
-        final_state = app.state.graph.invoke(initial_state)
+        final_state = app.state.graph.invoke(initial_state, config=config)
         logger.info("LangGraph invocation finished successfully.")
 
         # --- NEW: Save the final report ---

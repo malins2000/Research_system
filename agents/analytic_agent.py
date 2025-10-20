@@ -3,6 +3,7 @@ import re
 from typing import Any, List
 from agents.base_agent import BaseAgent
 from tools.persona_loader import PersonaLoader
+from utils import parse_llm_json_output
 
 class AnalyticAgent(BaseAgent):
     """
@@ -48,25 +49,10 @@ class AnalyticAgent(BaseAgent):
         )
 
         response_str = self.llm_client.query(prompt)
-        json_str = ""
-        try:
-            # Stage 1: Try parsing JSON wrapped in XML tags
-            match = re.search(r"<roles_json>(.*?)</roles_json>", response_str, re.DOTALL)
-            if match:
-                json_str = match.group(1).strip()
-                selected_roles = json.loads(json_str)
-            else:
-                # Stage 2 (Fallback): Use regex to find the first JSON object or array
-                print("Analytic Agent: Could not find <roles_json> tags. Falling back to regex search.")
-                json_match = re.search(r"\{.*\}|\[.*\]", response_str, re.DOTALL)
-                if json_match:
-                    json_str = json_match.group(0).strip()
-                    selected_roles = json.loads(json_str)
-                else:
-                    print(f"Analytic Agent: Error - No JSON found in the LLM response.")
-                    print(f"Raw LLM Response:\n{response_str}")
-                    return []
+        parsed_result = parse_llm_json_output(response_str, "roles_json") # Use the correct tag
 
+        if parsed_result:
+            selected_roles = parsed_result
             if isinstance(selected_roles, list) and all(isinstance(role, str) for role in selected_roles):
                 valid_roles = [role for role in selected_roles if role in available_roles]
                 if len(valid_roles) != len(selected_roles):
@@ -76,10 +62,8 @@ class AnalyticAgent(BaseAgent):
             else:
                 print("Analytic Agent: LLM response was not a list of strings.")
                 return []
-        except json.JSONDecodeError as e:
-            print(f"Analytic Agent: Error decoding JSON from the extracted block: {e}")
-            print(f"Extracted JSON String that failed parsing:\n{json_str}")
+        else:
+            # Handle parsing failure robustly
+            print(f"Analytic Agent: CRITICAL - Failed to parse valid JSON from LLM after all fallbacks.")
             return []
-        except Exception as e:
-            print(f"Analytic Agent: An unexpected error occurred: {e}")
-            return []
+            raise ValueError("Failed to parse a valid plan from the LLM. Stopping workflow.")

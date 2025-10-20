@@ -2,6 +2,7 @@ import json
 import re
 from typing import Any, List, Dict
 from agents.base_agent import BaseAgent
+from utils import parse_llm_json_output
 
 class TopicExplorerAgent(BaseAgent):
     """
@@ -37,36 +38,14 @@ class TopicExplorerAgent(BaseAgent):
         )
 
         response_str = self.llm_client.query(prompt)
+        parsed_result = parse_llm_json_output(response_str, "proposals_json") # Use the correct tag
 
-        json_str = ""
-        try:
-            # Stage 1: Try parsing JSON wrapped in XML tags
-            match = re.search(r"<proposals_json>(.*?)</proposals_json>", response_str, re.DOTALL)
-            if match:
-                json_str = match.group(1).strip()
-                proposals = json.loads(json_str)
-            else:
-                # Stage 2 (Fallback): Use regex to find the first JSON object or array
-                print("Topic Explorer Agent: Could not find <proposals_json> tags. Falling back to regex search.")
-                json_match = re.search(r"\{.*\}|\[.*\]", response_str, re.DOTALL)
-                if json_match:
-                    json_str = json_match.group(0).strip()
-                    proposals = json.loads(json_str)
-                else:
-                    print(f"Topic Explorer Agent: Error - No JSON found in the LLM response.")
-                    print(f"Raw LLM Response:\n{response_str}")
-                    return []
-
-            if isinstance(proposals, list):
-                print(f"Topic Explorer Agent: Found {len(proposals)} new topic proposals.")
-                return proposals
-            else:
-                print(f"Topic Explorer Agent: Parsed content was not a list. Content: {proposals}")
-                return []
-        except json.JSONDecodeError as e:
-            print(f"Topic Explorer Agent: Error decoding JSON from extracted block: {e}")
-            print(f"Extracted JSON String: {json_str}")
+        if parsed_result:
+            proposals = parsed_result
+            print(f"Topic Explorer Agent: Found {len(proposals)} new topic proposals.")
+            return proposals
+        else:
+            # Handle parsing failure robustly
+            print(f"Topic Explorer Agent: CRITICAL - Failed to parse valid JSON from LLM after all fallbacks.")
             return []
-        except Exception as e:
-            print(f"Topic Explorer Agent: An unexpected error occurred: {e}")
-            return []
+            # raise ValueError("Failed to parse a valid plan from the LLM. Stopping workflow.")

@@ -274,7 +274,12 @@ def exploration_node(state: GraphState) -> dict:
     # 4. Update the plan with all new topics
     if all_proposals:
         updater_agent = PlanUpdaterAgent(state["llm_client"])
-        updater_agent.execute(all_proposals, plan_manager, current_node_id)
+        updater_agent.execute(
+            all_proposals,
+            plan_manager,
+            current_node_id,
+            state["user_prompt"]  # Pass the main prompt
+        )
         log.append(f"Plan updated with {len(all_proposals)} new topics (AI + User).")
     else:
         log.append("No new topics proposed by AI or User.")
@@ -407,7 +412,7 @@ def after_critique_router(state: GraphState) -> str:
     # --- Planning Loop Logic (Unchanged, uses rating > 90) ---
     if last_completed_node == "planning_node":
         print("--- Deciding After Plan Critique ---")
-        if rating > 90:
+        if rating >= 90:
             print(f"Plan approved with rating {rating}. Proceeding to research.")
             state["planning_feedback"] = None # Clear feedback on success
             return "research_node"

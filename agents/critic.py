@@ -1,6 +1,7 @@
 import json
 import re
 from typing import Any, Union, Dict, Optional
+from utils import parse_llm_json_output
 
 from agents.base_agent import BaseAgent
 
@@ -55,34 +56,14 @@ class CriticAgent(BaseAgent):
         )
 
         response_str = self.llm_client.query(prompt)
+        parsed_result = parse_llm_json_output(response_str, "critic_json") # Use the correct tag
 
-        json_str = ""
-        try:
-            # Stage 1: Try parsing JSON wrapped in XML tags
-            match = re.search(r"<critic_json>(.*?)</critic_json>", response_str, re.DOTALL)
-            if match:
-                json_str = match.group(1).strip()
-                evaluation_result = json.loads(json_str)
-            else:
-                # Stage 2 (Fallback): Use regex to find the first JSON object or array
-                print("Critic Agent: Could not find <critic_json> tags. Falling back to regex search.")
-                json_match = re.search(r"\{.*\}|\[.*\]", response_str, re.DOTALL)
-                if json_match:
-                    json_str = json_match.group(0).strip()
-                    evaluation_result = json.loads(json_str)
-                else:
-                    print(f"Critic Agent: Error - No JSON found in the LLM response.")
-                    print(f"Raw LLM Response:\n{response_str}")
-                    return {"rating": 0, "feedback": "No valid JSON block found in response."}
-
-            # Ensure keys exist
-            if 'rating' not in evaluation_result or 'feedback' not in evaluation_result:
-                raise KeyError("Missing 'rating' or 'feedback' key in JSON.")
-
+        if parsed_result:
+            evaluation_result = parsed_result
             print("Critic Agent: Successfully evaluated content.")
             return evaluation_result
-
-        except Exception as e:
-            print(f"Critic Agent: Error parsing response: {e}")
-            print(f"Raw String that failed parsing:\n{json_str}")
-            return {"rating": 0, "feedback": f"An unexpected error occurred: {e}"}
+        else:
+            # Handle parsing failure robustly
+            print(f"Critic Agent: CRITICAL - Failed to parse valid JSON from LLM after all fallbacks.")
+            return {"rating": 0, "feedback": "CRITICAL PARSING FAILURE: LLM did not return usable JSON critique."}
+            # raise ValueError("Failed to parse a valid plan from the LLM. Stopping workflow.")

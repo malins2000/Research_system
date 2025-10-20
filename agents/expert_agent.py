@@ -21,7 +21,7 @@ class ExpertAgent(BaseAgent):
         self.name = name
         self.system_prompt = system_prompt
 
-def execute(self, task_description: str, context_data: List[Dict], discussion_history: List[str], project_summary_so_far: Optional[str], critic_feedback: Optional[str]) -> str:
+    def execute(self, task_description: str, context_data: List[Dict], discussion_history: List[str], project_summary_so_far: Optional[str], critic_feedback: Optional[str]) -> str:
         """
         Executes a task from the expert's point of view, considering the ongoing discussion.
 

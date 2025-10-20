@@ -3,6 +3,7 @@ import re  # <-- ADD THIS IMPORT
 from typing import Any, Optional
 from agents.base_agent import BaseAgent
 from tools.plan_manager import PlanManager
+from utils import parse_llm_json_output
 
 class PlannerAgent(BaseAgent):
     """
@@ -51,34 +52,13 @@ class PlannerAgent(BaseAgent):
         )
 
         response_str = self.llm_client.query(prompt)
+        parsed_result = parse_llm_json_output(response_str, "plan_json") # Use the correct tag
 
-        json_str = ""
-        try:
-            # Stage 1: Try parsing JSON wrapped in XML tags
-            match = re.search(r"<plan_json>(.*?)</plan_json>", response_str, re.DOTALL)
-            if match:
-                json_str = match.group(1).strip()
-                initial_structure = json.loads(json_str)
-            else:
-                # Stage 2 (Fallback): Use regex to find the first JSON object or array
-                print("Planner Agent: Could not find <plan_json> tags. Falling back to regex search.")
-                json_match = re.search(r"\{.*\}|\[.*\]", response_str, re.DOTALL)
-                if json_match:
-                    json_str = json_match.group(0).strip()
-                    initial_structure = json.loads(json_str)
-                else:
-                    print(f"Planner Agent: Error - No JSON found in the LLM response.")
-                    print(f"Raw LLM Response:\n{response_str}")
-                    raise ValueError("No valid JSON block found.")
-
-            # This will create a new plan OR overwrite the old one
+        if parsed_result:
+            initial_structure = parsed_result
             plan_manager.create_plan(prompt=user_prompt, initial_structure=initial_structure)
             print("Planner Agent: Successfully parsed plan and saved.")
-
-        except json.JSONDecodeError as e:
-            print(f"Planner Agent: Error decoding JSON from the extracted block: {e}")
-            print(f"Extracted JSON String that failed parsing:\n{json_str}")
+        else:
+            # Handle parsing failure robustly
+            print(f"Planner Agent: CRITICAL - Failed to parse valid JSON from LLM after all fallbacks.")
             raise ValueError("Failed to parse a valid plan from the LLM. Stopping workflow.")
-        except Exception as e:
-            print(f"Planner Agent: An unexpected error occurred: {e}")
-            raise
