@@ -14,6 +14,7 @@ from .expert_forge import ExpertForge
 from .topic_explorer import TopicExplorerAgent
 from .plan_updater import PlanUpdaterAgent
 from .output_generator import OutputGenerationAgent
+from .status_report_agent import StatusReportAgent
 
 __all__ = [
     "BaseAgent",
@@ -27,4 +28,5 @@ __all__ = [
     "TopicExplorerAgent",
     "PlanUpdaterAgent",
     "OutputGenerationAgent",
+    "StatusReportAgent",
 ]

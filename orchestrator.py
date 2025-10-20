@@ -178,7 +178,7 @@ def writing_node(state: GraphState) -> dict:
 
 def exploration_node(state: GraphState) -> dict:
     """
-    Explores new research topics based on the latest draft and retrieved data.
+    Explores new research topics based on AI and user proposals.
     """
     print("--- Executing Exploration Node ---")
     log = state.get("run_log", [])
@@ -195,17 +195,36 @@ def exploration_node(state: GraphState) -> dict:
 
     if not draft or not retrieved_docs:
         log.append("Exploration Node: Missing draft or documents for exploration.")
-        return {"run_log": log}
+        return {"run_log": log, "last_completed_node": "exploration_node"}
 
-    # Explore new topics
+    # --- UPDATED LOGIC ---
+
+    # 1. Get AI proposals
     explorer_agent = TopicExplorerAgent(state["llm_client"])
-    proposals = explorer_agent.execute(draft, retrieved_docs)
+    ai_proposals = explorer_agent.execute(draft, retrieved_docs)
+    log.append(f"AI Topic Explorer found {len(ai_proposals)} proposals.")
 
-    # Update the plan with new topics
-    if proposals:
+    # 2. Get User proposals from blackboard
+    user_proposals_section = blackboard.get_section("user_proposals")
+    user_proposals = list(user_proposals_section.values()) if user_proposals_section else []
+
+    if user_proposals:
+        log.append(f"Found {len(user_proposals)} user-submitted proposals on the blackboard.")
+        # Clear the section so they aren't processed again
+        blackboard.clear_section("user_proposals")
+
+    # 3. Combine all proposals
+    all_proposals = ai_proposals + user_proposals
+
+    # 4. Update the plan with all new topics
+    if all_proposals:
         updater_agent = PlanUpdaterAgent(state["llm_client"])
-        updater_agent.execute(proposals, plan_manager, current_node_id)
-        log.append(f"Plan updated with {len(proposals)} new topics.")
+        updater_agent.execute(all_proposals, plan_manager, current_node_id)
+        log.append(f"Plan updated with {len(all_proposals)} new topics (AI + User).")
+    else:
+        log.append("No new topics proposed by AI or User.")
+
+    # --- END UPDATED LOGIC ---
 
     return {"run_log": log, "last_completed_node": "exploration_node"}
 

@@ -8,3 +8,5 @@ chromadb
 sentence-transformers
 arxiv
 aiohttp
+fastapi
+uvicorn[standard]
