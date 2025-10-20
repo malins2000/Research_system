@@ -1,5 +1,7 @@
 import json
 from typing import TypedDict, List, Optional, Any
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import partial
 
 # Import agents and tools
 from agents import (
@@ -52,15 +54,18 @@ def planning_node(state: GraphState) -> dict:
 
 def research_node(state: GraphState) -> dict:
     """
-    Conducts research for the current plan node.
-    This involves analyzing requirements, creating experts, and gathering data.
+    Conducts parallel research and a multi-round parallel expert debate.
     """
-    print("--- Executing Research Node ---")
+    print("--- Executing Research Node (with Parallel Debate) ---")
     log = state.get("run_log", [])
     plan_manager = state["plan_manager"]
     blackboard = state["blackboard"]
     persona_loader = state["persona_loader"]
     llm_client = state["llm_client"]
+
+    # --- CONFIGURATION ---
+    DEBATE_ROUNDS = 3
+    # ---------------------
 
     # Get the next pending node from the plan
     next_node = plan_manager.get_next_pending_node()
@@ -72,9 +77,9 @@ def research_node(state: GraphState) -> dict:
     plan_manager.update_node_status(node_id, "in-progress")
     log.append(f"Starting research for plan node: '{next_node.title}' (ID: {node_id})")
 
-    # Clear blackboard for the new loop
+    # Clear blackboard sections for the new loop
     blackboard.clear_section("retrieved_data")
-    blackboard.clear_section("expert_insights")
+    blackboard.clear_section("expert_discussion") # Using a new section
     blackboard.clear_section("output_draft")
 
     # 1. Analyze task and determine required experts
@@ -85,20 +90,48 @@ def research_node(state: GraphState) -> dict:
     # 2. Create expert agents
     expert_forge = ExpertForge(llm_client, persona_loader)
     experts = expert_forge.create_experts(required_roles)
+    if not experts:
+        log.append("No experts were created. Skipping to next node.")
+        plan_manager.update_node_status(node_id, "completed") # Mark as complete to avoid loop
+        return {"run_log": log, "current_plan_node_id": node_id, "last_completed_node": "research_node"}
 
-    # 3. Gather information
+    # 3. Gather information (using the new parallel RetrievalAgent)
     rag_system = state["rag_system"]
     arxiv_tool = state["arxiv_tool"]
     retrieval_agent = RetrievalAgent(llm_client, rag_system, arxiv_tool)
     retrieved_docs = retrieval_agent.execute(next_node.title)
     blackboard.post("retrieved_data", "docs", retrieved_docs)
-    log.append(f"Retrieved {len(retrieved_docs)} documents.")
+    log.append(f"Retrieved {len(retrieved_docs)} unique documents.")
 
-    # 4. Get insights from experts (sequentially for simplicity)
-    for expert in experts:
-        insights = expert.execute(next_node.description, retrieved_docs)
-        blackboard.post("expert_insights", expert.name, insights)
-        log.append(f"Got insights from expert: {expert.name}")
+    # 4. Run the Parallel Expert Debate
+    discussion_history = []
+    log.append(f"Starting {DEBATE_ROUNDS}-round expert debate with {len(experts)} experts...")
+
+    for i in range(DEBATE_ROUNDS):
+        print(f"--- Debate Round {i+1} ---")
+        log.append(f"Starting debate round {i+1}/{DEBATE_ROUNDS}")
+
+        round_responses = []
+        with ThreadPoolExecutor(max_workers=len(experts)) as executor:
+            # Create a partial function to pass the common arguments
+            execute_task = partial(
+                lambda expert: expert.execute(next_node.description, retrieved_docs, discussion_history),
+            )
+
+            # Map the execute function to all experts in parallel
+            # This sends all requests to vLLM at once
+            results = list(executor.map(execute_task, experts))
+
+            round_responses = results
+
+        # Add all responses from this round to the main history
+        discussion_history.extend(round_responses)
+        log.append(f"Round {i+1} complete. Collected {len(round_responses)} insights.")
+
+        # Post the *entire* updated history to the blackboard
+        blackboard.post("expert_discussion", "transcript", discussion_history)
+
+    log.append("Debate finished. Full transcript saved to blackboard.")
 
     return {
         "run_log": log,
@@ -109,7 +142,7 @@ def research_node(state: GraphState) -> dict:
 
 def writing_node(state: GraphState) -> dict:
     """
-    Synthesizes expert insights into a coherent draft.
+    Synthesizes the full expert debate transcript into a coherent draft.
     """
     print("--- Executing Writing Node ---")
     log = state.get("run_log", [])
@@ -124,18 +157,18 @@ def writing_node(state: GraphState) -> dict:
     current_node = plan_manager._find_node_by_id(plan_manager.plan, current_node_id)
     topic_description = current_node.description
 
-    insights_section = blackboard.get_section("expert_insights")
-    insights = list(insights_section.values()) if insights_section else []
+    # Get the full debate transcript from the blackboard
+    debate_transcript = blackboard.get("expert_discussion", "transcript")
 
-    if not insights:
-        log.append("Writing Node: No insights found on blackboard to synthesize.")
+    if not debate_transcript:
+        log.append("Writing Node: No debate transcript found on blackboard to synthesize.")
         return {"run_log": log, "last_completed_node": "writing_node"}
 
-    # Generate the output
+    # Generate the output using the OutputGenerationAgent
     output_agent = OutputGenerationAgent(state["llm_client"])
-    draft_text = output_agent.execute(topic_description, insights)
+    draft_text = output_agent.execute(topic_description, debate_transcript)
 
-    # Post the draft to the blackboard
+    # Post the final draft to the blackboard
     blackboard.post("output_draft", current_node_id, draft_text)
     log.append(f"Draft written for node: {current_node_id}")
 

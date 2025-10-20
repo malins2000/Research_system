@@ -21,36 +21,47 @@ class ExpertAgent(BaseAgent):
         self.name = name
         self.system_prompt = system_prompt
 
-    def execute(self, task_description: str, context_data: List[Dict]) -> str:
+    def execute(self, task_description: str, context_data: List[Dict], discussion_history: List[str]) -> str:
         """
-        Executes a task from the expert's point of view.
+        Executes a task from the expert's point of view, considering the ongoing discussion.
 
         Args:
             task_description: A description of the task to be performed.
             context_data: A list of dictionaries, typically retrieved documents, to provide context.
+            discussion_history: A list of strings representing the conversation from previous rounds.
 
         Returns:
-            A string containing the expert's insight, analysis, or contribution.
+            A string containing the expert's insight, analysis, or contribution for this round.
         """
-        print(f"Expert Agent '{self.name}': Executing task...")
+        print(f"Expert Agent '{self.name}': Executing task (considering discussion)...")
 
         # Format the context data into a readable string
         context_str = "\n\n".join([f"Source: {doc.get('metadata', {}).get('source', 'N/A')}\nContent: {doc.get('content', '')}" for doc in context_data])
 
+        # Format the discussion history
+        if not discussion_history:
+            history_str = "No discussion has taken place yet. You are providing the first set of insights."
+        else:
+            history_str = "\n\n".join(discussion_history)
+
         # Formulate the prompt using the expert's unique system prompt
-        # This is where the "persona" of the agent comes to life.
         prompt = (
             f"{self.system_prompt}\n\n"
-            f"You have been assigned the following task:\n"
-            f"**Task:** {task_description}\n\n"
-            f"To help you, here is some relevant data that has been retrieved:\n"
-            f"**Contextual Data:**\n{context_str}\n\n"
-            f"Based on your specific expertise and the provided data, please provide a comprehensive analysis and your key insights. "
-            f"Present your response as a clear, well-structured block of text."
+            f"You are part of an expert panel. Your goal is to collaborate to provide a comprehensive answer.\n\n"
+            f"**Main Task:** {task_description}\n\n"
+            f"**Contextual Data (From Research):**\n{context_str}\n\n"
+            f"**Ongoing Discussion History:**\n{history_str}\n\n"
+            f"**Your Instructions:**\n"
+            f"1. Review the Main Task, Contextual Data, and the Ongoing Discussion History.\n"
+            f"2. Based on your unique expertise, provide your analysis. \n"
+            f"3. You can *build on* others' points, *critique* them, or *introduce* a new perspective your colleagues may have missed.\n"
+            f"4. Format your response as a clear, well-structured block of text. *Do not* prefix with your name (e.g., 'Economist:'). Just provide your thoughts.\n\n"
+            f"Your Response:"
         )
 
         # Query the LLM
         response = self.llm_client.query(prompt)
 
-        print(f"Expert Agent '{self.name}': Successfully generated response.")
-        return response
+        print(f"Expert Agent '{self.name}': Successfully generated response for this round.")
+        # Return a formatted string that includes the agent's name for the discussion history
+        return f"**{self.name}:**\n{response}"
