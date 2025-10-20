@@ -21,7 +21,7 @@ class ExpertAgent(BaseAgent):
         self.name = name
         self.system_prompt = system_prompt
 
-    def execute(self, task_description: str, context_data: List[Dict], discussion_history: List[str], project_summary_so_far: Optional[str]) -> str:
+def execute(self, task_description: str, context_data: List[Dict], discussion_history: List[str], project_summary_so_far: Optional[str], critic_feedback: Optional[str]) -> str:
         """
         Executes a task from the expert's point of view, considering the ongoing discussion.
 
@@ -51,11 +51,18 @@ class ExpertAgent(BaseAgent):
             summary_context = project_summary_so_far
         # --- END ADDITION ---
 
+        # --- ADD THIS ---
+        feedback_context = "No specific feedback from the critic on the previous attempt."
+        if critic_feedback:
+            feedback_context = f"IMPORTANT: The previous attempt at this section was rejected by the critic with the following feedback: '{critic_feedback}'. Ensure your contribution helps address these points."
+        # --- END ADDITION ---
+
         prompt = (
             f"{self.system_prompt}\n\n"
             f"You are part of an expert panel working on a larger research project.\n\n"
             f"**Overall Project Summary (Work Completed So Far):**\n{summary_context}\n\n" # <-- ADDED
             f"**Current Task:** {task_description}\n\n"
+            f"**Critic Feedback on Last Attempt:**\n{feedback_context}\n\n" # <-- ADDED
             f"**Contextual Data (For Current Task):**\n{context_str}\n\n"
             f"**Ongoing Discussion (For Current Task):**\n{history_str}\n\n"
             f"**Your Instructions:**\n"

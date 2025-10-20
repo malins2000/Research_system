@@ -42,6 +42,9 @@ class GraphState(TypedDict):
     # --- NEW FIELD ---
     project_summary_so_far: Optional[str] # Stores the running summary
 
+    # --- NEW FIELD ---
+    research_feedback: Optional[str] # Stores critic feedback for the current research topic
+
 
 # --- Node Functions ---
 
@@ -83,6 +86,13 @@ def research_node(state: GraphState) -> dict:
     # --- CONFIGURATION ---
     DEBATE_ROUNDS = 3
     # ---------------------
+
+    # --- ADD THIS: Get feedback from the last critique attempt ---
+    feedback_for_experts = state.get("research_feedback")
+    if feedback_for_experts:
+        log.append(f"Retrying research based on critic feedback: {feedback_for_experts}")
+    # --- END ADDITION ---
+
 
     # Get the next pending node from the plan
     next_node = plan_manager.get_next_pending_node()
@@ -138,16 +148,16 @@ def research_node(state: GraphState) -> dict:
             # Get the current summary from the state
             current_summary = state.get("project_summary_so_far")
 
-            # Create a partial function to pass ALL arguments
+            # Create a partial function to pass ALL arguments, INCLUDING feedback
             execute_task = partial(
                 lambda expert: expert.execute(
                     next_node.description,
                     retrieved_docs,
                     discussion_history,
-                    current_summary # <-- Pass the summary here
+                    current_summary,
+                    feedback_for_experts # <-- Pass the feedback here
                 ),
             )
-            # --- END MODIFICATION ---
 
             # Map the execute function to all experts in parallel
             # This sends all requests to vLLM at once
@@ -164,11 +174,15 @@ def research_node(state: GraphState) -> dict:
 
     log.append("Debate finished. Full transcript saved to blackboard.")
 
+    # --- ADD THIS: Clear the feedback after using it ---
+    # Ensures feedback from a previous failure isn't reused if the next critique passes
     return {
         "run_log": log,
         "current_plan_node_id": node_id,
-        "last_completed_node": "research_node"
+        "last_completed_node": "research_node",
+        "research_feedback": None # Clear feedback after the debate runs
     }
+    # --- END ADDITION ---
 
 
 def writing_node(state: GraphState) -> dict:
@@ -421,11 +435,17 @@ def after_critique_router(state: GraphState) -> str:
 
     elif last_completed_node in ["writing_node", "exploration_node"]:
         print("--- Deciding After Research Critique ---")
-        if rating > 80:
+        if rating > 80: # Approved
             print(f"Draft approved with rating {rating}. Proceeding to update summary.")
+            # --- ADD THIS: Clear feedback on success ---
+            state["research_feedback"] = None
+            # --- END ADDITION ---
             return "update_summary_node"
-        else:
+        else: # Rejected
             print(f"Draft rejected with rating {rating}. Retrying research for the current node.")
+            # --- ADD THIS: Store feedback before looping ---
+            state["research_feedback"] = feedback.get('feedback')
+            # --- END ADDITION ---
             return "research_node"
 
     else:
