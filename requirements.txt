@@ -10,3 +10,4 @@ arxiv
 aiohttp
 fastapi
 uvicorn[standard]
+gradio
