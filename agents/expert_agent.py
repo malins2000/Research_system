@@ -1,5 +1,5 @@
 import json
-from typing import Any, List, Dict
+from typing import Any, List, Dict, Optional
 
 from agents.base_agent import BaseAgent
 
@@ -21,7 +21,7 @@ class ExpertAgent(BaseAgent):
         self.name = name
         self.system_prompt = system_prompt
 
-    def execute(self, task_description: str, context_data: List[Dict], discussion_history: List[str]) -> str:
+    def execute(self, task_description: str, context_data: List[Dict], discussion_history: List[str], project_summary_so_far: Optional[str]) -> str:
         """
         Executes a task from the expert's point of view, considering the ongoing discussion.
 
@@ -29,6 +29,7 @@ class ExpertAgent(BaseAgent):
             task_description: A description of the task to be performed.
             context_data: A list of dictionaries, typically retrieved documents, to provide context.
             discussion_history: A list of strings representing the conversation from previous rounds.
+            project_summary_so_far: A summary of the work completed so far in the project.
 
         Returns:
             A string containing the expert's insight, analysis, or contribution for this round.
@@ -44,13 +45,19 @@ class ExpertAgent(BaseAgent):
         else:
             history_str = "\n\n".join(discussion_history)
 
-        # Formulate the prompt using the expert's unique system prompt
+        # --- ADD THIS ---
+        summary_context = "No overall project summary is available yet."
+        if project_summary_so_far:
+            summary_context = project_summary_so_far
+        # --- END ADDITION ---
+
         prompt = (
             f"{self.system_prompt}\n\n"
-            f"You are part of an expert panel. Your goal is to collaborate to provide a comprehensive answer.\n\n"
-            f"**Main Task:** {task_description}\n\n"
-            f"**Contextual Data (From Research):**\n{context_str}\n\n"
-            f"**Ongoing Discussion History:**\n{history_str}\n\n"
+            f"You are part of an expert panel working on a larger research project.\n\n"
+            f"**Overall Project Summary (Work Completed So Far):**\n{summary_context}\n\n" # <-- ADDED
+            f"**Current Task:** {task_description}\n\n"
+            f"**Contextual Data (For Current Task):**\n{context_str}\n\n"
+            f"**Ongoing Discussion (For Current Task):**\n{history_str}\n\n"
             f"**Your Instructions:**\n"
             f"1. Review the Main Task, Contextual Data, and the Ongoing Discussion History.\n"
             f"2. Based on your unique expertise, provide your analysis. \n"

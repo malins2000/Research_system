@@ -1,6 +1,6 @@
 import json
 import re
-from typing import Any, Union, Dict
+from typing import Any, Union, Dict, Optional
 
 from agents.base_agent import BaseAgent
 
@@ -18,61 +18,62 @@ class CriticAgent(BaseAgent):
         """
         super().__init__(llm_client)
 
-    def execute(self, content_to_review: Union[Dict, str], evaluation_criteria: str) -> Dict[str, Any]:
+    def execute(self, content_to_review: Union[Dict, str], evaluation_criteria: str, previous_feedback: Optional[str] = None) -> Dict[str, Any]:
         """
         Evaluates a piece of content based on specific criteria.
 
         Args:
             content_to_review: The content to be evaluated (e.g., a plan dict or generated text).
-            evaluation_criteria: A string describing what to check for (e.g., "Check for logical consistency.").
+            evaluation_criteria: A string describing what to check for.
+            previous_feedback: Optional. The feedback from the last failed attempt.
 
         Returns:
-            A dictionary containing the evaluation results (e.g., {'approved': bool, 'feedback': str, 'rating': float}).
+            A dictionary containing the evaluation results (e.g., {'rating': int, 'feedback': str}).
         """
         print("Critic Agent: Evaluating content...")
 
-        # Ensure the content is in a string format for the prompt
         if isinstance(content_to_review, dict):
             content_str = json.dumps(content_to_review, indent=2)
         else:
             content_str = content_to_review
 
-        # NEW PROMPT: Ask the model to wrap the JSON in <critic_json> tags.
+        feedback_prompt = "This is the first review of this content."
+        if previous_feedback:
+            feedback_prompt = f"The previous version was rejected with this feedback: '{previous_feedback}'. Please check if the new content has addressed these issues."
+
+        # New prompt demanding a 0-100 rating and actionable feedback
         prompt = (
-            f"You are a meticulous critic. Your task is to evaluate the following content based on the given criteria. "
-            f"Think step-by-step. First, analyze the content. Second, create a JSON object with your feedback. "
-            f"Finally, wrap this JSON object in <critic_json> tags. "
-            f"Do not include any other text after the closing </critic_json> tag.\n\n"
-            f"The JSON must have three keys: 'approved' (boolean), 'feedback' (string), and 'rating' (a float from 0.0 to 5.0).\n\n"
+            f"You are a meticulous critic. First, think step-by-step in <think> tags. "
+            f"Second, provide your final evaluation as a JSON object wrapped in <critic_json> tags. "
+            f"Your entire response *must* end with the closing </critic_json> tag.\n\n"
+            f"The JSON object must have two keys:\n"
+            f"1. 'rating' (an integer from 0 to 100).\n"
+            f"2. 'feedback' (a string providing *actionable suggestions* for improvement. If the rating is low, explain what is missing. If the rating is high, confirm it's good.).\n\n"
             f"**Evaluation Criteria:**\n{evaluation_criteria}\n\n"
-            f"**Content to Review:**\n{content_str}\n\n"
-            f"YOUR RESPONSE:"
+            f"**Previous Feedback:**\n{feedback_prompt}\n\n"
+            f"**Content to Review:**\n{content_str}"
         )
 
-        # Query the LLM
         response_str = self.llm_client.query(prompt)
-        json_str = "" # Initialize for use in the except block
 
         try:
-            # NEW PARSING LOGIC: Use regex to find the content inside our tags.
             match = re.search(r"<critic_json>(.*?)</critic_json>", response_str, re.DOTALL)
-
             if not match:
-                print("Critic Agent: Error - Could not find <critic_json> tags in the LLM response.")
+                print(f"Critic Agent: Error - Could not find <critic_json> tags.")
                 print(f"Raw LLM Response:\n{response_str}")
-                return {"approved": False, "feedback": "Failed to find <critic_json> tags in response.", "rating": 0.0}
+                return {"rating": 0, "feedback": "Failed to parse <critic_json> from LLM response."}
 
-            # Extract the clean JSON string
             json_str = match.group(1).strip()
-
-            # Parse the extracted JSON
             evaluation_result = json.loads(json_str)
+
+            # Ensure keys exist
+            if 'rating' not in evaluation_result or 'feedback' not in evaluation_result:
+                raise KeyError("Missing 'rating' or 'feedback' key in JSON.")
+
             print("Critic Agent: Successfully evaluated content.")
             return evaluation_result
-        except json.JSONDecodeError as e:
-            print(f"Critic Agent: Error decoding JSON from the extracted block: {e}")
-            print(f"Extracted JSON String that failed parsing:\n{json_str}")
-            return {"approved": False, "feedback": "Failed to parse LLM response.", "rating": 0.0}
+
         except Exception as e:
-            print(f"Critic Agent: An unexpected error occurred: {e}")
-            return {"approved": False, "feedback": "An unexpected error occurred during evaluation.", "rating": 0.0}
+            print(f"Critic Agent: Error parsing response: {e}")
+            print(f"Raw String: {response_str}")
+            return {"rating": 0, "feedback": f"An unexpected error occurred: {e}"}
