@@ -11,7 +11,7 @@ import logging
 from orchestrator import create_graph, GraphState
 from tools import PlanManager, Blackboard, PersonaLoader, RAGSystem, ArxivSearchTool
 from agents import StatusReportAgent
-from mock_llm import MockLLMClient  # Or your RealLLMClient
+from real_llm import RealLLMClient   # <-- ADD THIS
 
 # --- Setup Logging ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
@@ -25,7 +25,7 @@ try:
     logger.info("Initializing system components...")
 
     # Use the same LLM client for the server and the graph
-    llm_client = MockLLMClient()
+    llm_client = RealLLMClient()
 
     plan_manager = PlanManager("research_plan.json")
     blackboard = Blackboard("blackboard.json")

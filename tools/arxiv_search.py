@@ -1,7 +1,6 @@
 import arxiv
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
-from collections import deque
 import logging
 
 
@@ -21,7 +20,7 @@ class ArxivSearchTool:
             self.logger.addHandler(handler)
         self.logger.info("ArxivSearchTool initialized.")
 
-    def search(self, query: str, max_results: int = 5, days_limit: Optional[int] = None) -> deque[Dict[str, Any]]:
+    def search(self, query: str, max_results: int = 5, days_limit: Optional[int] = None) -> List[Dict[str, Any]]:
         """
         Performs a single, synchronous search on arXiv.
 
@@ -31,7 +30,7 @@ class ArxivSearchTool:
             days_limit: Optional. Limit results to the last X days.
 
         Returns:
-            A deque object of formatted result dictionaries.
+            A list object of formatted result dictionaries.
         """
         self.logger.info(f"Executing arXiv search for query: '{query}'")
         try:
@@ -42,7 +41,7 @@ class ArxivSearchTool:
                 sort_order=arxiv.SortOrder.Descending
             )
 
-            results = deque()
+            results = []
             cutoff_date = None
             if days_limit:
                 cutoff_date = datetime.now() - timedelta(days=days_limit)
@@ -68,4 +67,4 @@ class ArxivSearchTool:
             return results
         except Exception as e:
             self.logger.error(f"Error in arXiv search: {str(e)}")
-            return deque()
+            return []
