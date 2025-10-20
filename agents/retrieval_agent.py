@@ -1,5 +1,6 @@
 import json
 from typing import Any, List, Dict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from agents.base_agent import BaseAgent
 from tools.rag_system import RAGSystem
 from tools.arxiv_search import ArxivSearchTool
@@ -25,7 +26,7 @@ class RetrievalAgent(BaseAgent):
 
     def execute(self, topic: str, num_results: int = 5) -> List[Dict[str, Any]]:
         """
-        Gathers information on a given topic.
+        Gathers information on a given topic from all available sources in parallel.
 
         Args:
             topic: The topic to research.
@@ -36,47 +37,69 @@ class RetrievalAgent(BaseAgent):
         """
         print(f"Retrieval Agent: Gathering information for topic: '{topic}'")
 
-        # Step 1: Brainstorm search queries with the LLM
+        # Step 1: Brainstorm search queries (this remains sequential)
         prompt = (
             f"You are a research assistant. Brainstorm a list of 3-5 diverse and effective search queries "
             f"to gather information on the following topic: '{topic}'. "
             f"Return the queries as a JSON list of strings."
         )
-
         response_str = self.llm_client.query(prompt)
 
         try:
             search_queries = json.loads(response_str)
         except json.JSONDecodeError as e:
             print(f"Retrieval Agent: Error decoding search queries from LLM response: {e}")
-            # Fallback to using the topic itself as the only query
             search_queries = [topic]
 
-        # Step 2: Execute queries and retrieve documents
+        # Step 2: Execute all queries and source searches in parallel
         all_retrieved_docs = []
-        for query in search_queries:
-            print(f"Retrieval Agent: Executing query: '{query}'")
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            futures = []
+            for query in search_queries:
+                print(f"Retrieval Agent: Submitting jobs for query: '{query}'")
+                # Submit a job for the RAG system
+                futures.append(executor.submit(self.rag_system.query, query_text=query, k=num_results))
+                # Submit a job for the Arxiv tool
+                futures.append(executor.submit(self.arxiv_tool.search, query=query, max_results=num_results))
 
-            # Query the RAG system
-            rag_results = self.rag_system.query(query_text=query, k=num_results)
-            all_retrieved_docs.extend(rag_results)
+            # Collect results as they complete
+            for future in as_completed(futures):
+                try:
+                    results = future.result()
+                    if results:
+                        all_retrieved_docs.extend(results)
+                except Exception as e:
+                    print(f"Retrieval Agent: A search job failed: {e}")
 
-            # Query the arXiv tool
-            arxiv_results = self.arxiv_tool.search(query=query, max_results=num_results)
-            all_retrieved_docs.extend(arxiv_results)
+        print(f"Retrieval Agent: Collected {len(all_retrieved_docs)} raw results from all sources.")
 
         # Step 3: Consolidate and de-duplicate results
         unique_docs = {}
         for doc in all_retrieved_docs:
-            # Use 'doc_id' from metadata for de-duplication
             doc_id = doc.get('metadata', {}).get('doc_id')
             if doc_id:
                 unique_docs[doc_id] = doc
             else:
-                # Fallback to using content for de-duplication if no id is present
                 unique_docs[doc['content']] = doc
 
         final_results = list(unique_docs.values())
         print(f"Retrieval Agent: Found {len(final_results)} unique documents.")
+
+        # Step 4: Add new documents to RAG (can also be parallelized)
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            futures = []
+            for doc in final_results:
+                # We only need to add documents that came from external sources
+                if doc.get('metadata', {}).get('source') == 'arXiv':
+                    futures.append(executor.submit(self.rag_system.add_document, doc['content'], doc['metadata']))
+
+            # Wait for all add operations to complete
+            for future in as_completed(futures):
+                try:
+                    future.result() # We don't need the return value, just wait for it to finish
+                except Exception as e:
+                    print(f"Retrieval Agent: Failed to add document to RAG: {e}")
+
+        print("Retrieval Agent: RAG system updated with new findings.")
 
         return final_results
